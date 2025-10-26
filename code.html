@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="uz">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Real-time HTML Editor — CodeBek</title>
+  <style>
+    :root{
+      --bg:#0f1724; --panel:#0b1220; --muted:#9aa4b2; --accent:#60a5fa; --glass: rgba(255,255,255,0.03);
+      --radius:12px; --gap:12px; --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', 'Courier New', monospace;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;font-family:Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;color:#e6eef6;background:linear-gradient(180deg,var(--bg),#071022);}
+
+    .app{min-height:100vh;display:flex;flex-direction:column;padding:18px;gap:12px}
+    header{display:flex;align-items:center;gap:16px}
+    .brand{display:flex;align-items:center;gap:12px}
+    .logo{width:44px;height:44px;border-radius:10px;background:linear-gradient(135deg,var(--accent),#7dd3fc);display:grid;place-items:center;color:#05233b;font-weight:700}
+    h1{font-size:1rem;margin:0}
+    p.lead{margin:0;color:var(--muted);font-size:0.9rem}
+
+    .toolbar{margin-left:auto;display:flex;gap:8px;align-items:center}
+    .btn{background:var(--glass);border:1px solid rgba(255,255,255,0.04);padding:8px 12px;border-radius:10px;color:var(--muted);cursor:pointer;font-weight:600}
+    .btn.primary{background:linear-gradient(90deg,var(--accent),#7dd3fc);color:#02243a;border:none}
+    .btn.ghost{background:transparent;border:1px dashed rgba(255,255,255,0.03)}
+
+    .editor-wrap{display:flex;flex:1;gap:12px;align-items:stretch}
+    /* Panels */
+    .panel{flex:1;min-height:320px;background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent);border-radius:var(--radius);padding:12px;display:flex;flex-direction:column;border:1px solid rgba(255,255,255,0.03)}
+    .panel h2{margin:0 0 8px 0;font-size:0.9rem}
+    .controls{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+
+    textarea.code{flex:1;width:100%;resize:none;border-radius:10px;padding:12px;font-family:var(--mono);font-size:13px;background:#071226;border:1px solid rgba(255,255,255,0.03);color:#dff3ff;line-height:1.45;overflow:auto}
+
+    .preview{flex:1;border-radius:10px;overflow:hidden;border:1px solid rgba(255,255,255,0.03);background:white}
+    .frame-toolbar{display:flex;justify-content:space-between;align-items:center;padding:6px 8px;border-bottom:1px solid rgba(255,255,255,0.02);background:linear-gradient(180deg, rgba(255,255,255,0.01), transparent)}
+    .frame-toolbar .meta{color:var(--muted);font-size:13px}
+
+    footer{color:var(--muted);font-size:13px;text-align:center;margin-top:6px}
+
+    /* Responsive */
+    @media (max-width:900px){
+      .editor-wrap{flex-direction:column}
+      header{flex-direction:column;align-items:flex-start}
+      .toolbar{margin-left:0;width:100%;}
+    }
+
+    /* small helpers */
+    .split{display:flex;gap:8px}
+    .toggle{display:inline-flex;align-items:center;gap:6px}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="brand">
+        <div>
+          <h1>Real-time HTML Editor</h1>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <button id="downloadBtn" class="btn">Download .html</button>
+        <button id="resetBtn" class="btn ghost">Reset</button>
+        <button id="themeBtn" class="btn">Dark</button>
+        <button id="fullscreenBtn" class="btn primary">Fullscreen Preview</button>
+      </div>
+    </header>
+
+    <main class="editor-wrap">
+      <section class="panel" style="flex:0.6;min-width:260px;">
+        <div class="controls">
+          <h2>Editor</h2>
+          <div style="flex:1"></div>
+          <label class="toggle"><input type="checkbox" id="liveToggle" checked> Live</label>
+          <label class="toggle"><input type="checkbox" id="autoSelect"> Auto-select</label>
+        </div>
+
+        <textarea id="code" class="code" spellcheck="false" aria-label="HTML editor"></textarea>
+
+        <div style="margin-top:8px;display:flex;gap:8px;justify-content:flex-end;align-items:center">
+          <small style="color:var(--muted)">Preview updates <span id="status">—</span></small>
+        </div>
+      </section>
+
+      <section class="panel" style="flex:0.8;min-width:260px;">
+        <div class="frame-toolbar">
+          <div class="meta">Preview</div>
+          <div class="meta">Viewport: <span id="viewportSize">auto</span></div>
+        </div>
+        <iframe id="preview" class="preview" sandbox="allow-scripts allow-same-origin"></iframe>
+      </section>
+    </main>
+
+    <footer>Made with ❤️ by 404 Not Found — copy, customize, and use.</footer>
+  </div>
+
+  <script>
+    // Default content
+    const defaultContent = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Live Preview</title>
+  <style>
+    body{font-family:Inter, system-ui, -apple-system; padding:20px; line-height:1.6}
+    h1{color:#0b69ff}
+  </style>
+</head>
+<body>
+  <h1>Hello — live preview!</h1>
+  <p>Try editing HTML, add &lt;style&gt; or &lt;script&gt; sections. This preview is sandboxed but allows scripts.</p>
+</body>
+</html>`;
+
+    // Elements
+    const codeEl = document.getElementById('code');
+    const preview = document.getElementById('preview');
+    const status = document.getElementById('status');
+    const liveToggle = document.getElementById('liveToggle');
+    const autoSelect = document.getElementById('autoSelect');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const themeBtn = document.getElementById('themeBtn');
+    const fullscreenBtn = document.getElementById('fullscreenBtn');
+    const viewportSize = document.getElementById('viewportSize');
+
+    // Initial setup
+    codeEl.value = defaultContent;
+    let old = '';
+    let live = true;
+    let timeoutId = null;
+    let lastUpdate = 0;
+
+    function updatePreview(force=false){
+      if(!live && !force) return;
+      const val = codeEl.value;
+      if(val === old) return;
+      old = val;
+      const t0 = performance.now();
+      // write to iframe
+      const doc = preview.contentWindow.document;
+      doc.open();
+      doc.write(val);
+      // if content equals default (without whitespace) append a small watermark
+      const compact = val.replace(/\\s+/g,'');
+      const compactDef = defaultContent.replace(/\\s+/g,'');
+      if(compact === compactDef){
+        doc.write('<div style="position:fixed;right:8px;bottom:8px;opacity:0.6;font-size:12px">Preview — CodeBek</div>');
+      }
+      doc.close();
+      lastUpdate = performance.now() - t0;
+      status.textContent = lastUpdate.toFixed(0) + 'ms';
+    }
+
+    // Debounced live update (150ms)
+    function scheduleUpdate(){
+      if(!live) return;
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(updatePreview, 150);
+      status.textContent = 'scheduled';
+    }
+
+    // Events
+    codeEl.addEventListener('input', () => {
+      if(liveToggle.checked) scheduleUpdate();
+    });
+
+    liveToggle.addEventListener('change', (e)=>{
+      live = e.target.checked;
+      status.textContent = live ? 'live' : 'paused';
+      if(live) updatePreview(true);
+    });
+
+    autoSelect.addEventListener('change',(e)=>{
+      if(e.target.checked){ codeEl.focus(); codeEl.select(); }
+    });
+
+    // Download HTML file
+    downloadBtn.addEventListener('click', ()=>{
+      const blob = new Blob([codeEl.value], {type:'text/html'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'live-preview.html';
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    });
+
+    // Reset
+    resetBtn.addEventListener('click', ()=>{
+      if(!confirm('Haqiqatan ham qayta yuklamoqchimisiz?')) return;
+      codeEl.value = defaultContent; updatePreview(true);
+    });
+
+    // Theme toggle (light/dark for editor)
+    let dark = true;
+    themeBtn.addEventListener('click', ()=>{
+      dark = !dark;
+      if(dark){
+        document.documentElement.style.setProperty('--bg','#0f1724');
+        themeBtn.textContent = 'Dark';
+      } else {
+        document.documentElement.style.setProperty('--bg','#f6fbff');
+        themeBtn.textContent = 'Light';
+      }
+    });
+
+    // Fullscreen preview
+    fullscreenBtn.addEventListener('click', async ()=>{
+      if(document.fullscreenElement){
+        await document.exitFullscreen();
+        fullscreenBtn.textContent = 'Fullscreen Preview';
+      } else {
+        try{ await preview.requestFullscreen(); fullscreenBtn.textContent = 'Live'; } catch(e){ alert('Fullscreen not supported here.'); }
+      }
+    });
+
+    // Update viewport display on resize
+    function refreshViewport(){
+      const w = preview.clientWidth; const h = preview.clientHeight; viewportSize.textContent = w + '×' + h;
+    }
+    window.addEventListener('resize', refreshViewport);
+    preview.addEventListener('load', refreshViewport);
+
+    // Init
+    updatePreview(true);
+    refreshViewport();
+
+    // Keyboard shortcut: Ctrl/Cmd+Enter -> force update
+    window.addEventListener('keydown', (e)=>{
+      if((e.ctrlKey||e.metaKey) && e.key === 'Enter'){
+        e.preventDefault(); updatePreview(true);
+      }
+    });
+
+    // Mobile UX: focus textarea on tap
+    preview.addEventListener('touchstart', ()=>{ codeEl.blur(); });
+
+  </script>
+</body>
+</html>
